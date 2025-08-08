@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { Link } from 'react-router-dom';
 import { ListChildComponentProps } from 'react-window';
 import ImageSkeleton from './ImageSkeleton';
-import { Product } from '../contexts/ProductContext';
+import { Product } from '../types/Product';
 
 interface ItemData {
   products: Product[];

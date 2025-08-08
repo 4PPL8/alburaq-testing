@@ -2,7 +2,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Package, Shield, Truck, Star, Zap } from 'lucide-react';
-import { useProducts } from '../contexts/ProductContext';
+import { useProducts } from '../hooks/useProducts';
 import ProductCard from '../components/ProductCard';
 import SEO from '../components/SEO';
 

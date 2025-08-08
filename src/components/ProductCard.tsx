@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Link } from 'react-router-dom';
-import { Product } from '../contexts/ProductContext';
+import { Product } from '../types/Product';
 import ImageSkeleton from './ImageSkeleton';
 
 interface ProductCardProps {

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Filter, Grid, List, Search } from 'lucide-react';
-import { useProducts } from '../contexts/ProductContext';
+import { useProducts } from '../hooks/useProducts';
 import ProductCard from '../components/ProductCard';
 import ImageSkeleton from '../components/ImageSkeleton';
 import { FixedSizeList as VirtualList } from 'react-window';

@@ -1,33 +1,13 @@
 // src/contexts/ProductContext.tsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { supabase } from '../supabaseClient';
+import { Product } from '../types/Product';
+import { ProductContextType } from './ProductContextType';
+import { ProductContext } from './ProductContextInstance';
 
 // --- Generic placeholder for when NO image is provided (e.g., if admin adds a product without an image) ---
 const DefaultProductPlaceholder = 'https://placehold.co/400x400/CCCCCC/000000?text=No+Image';
-
-
-export interface Product {
-  id: string;
-  name: string;
-  category: string;
-  description: string;
-  image: string;
-  features: string[];
-  images?: string[]; // Optional array of image URLs
-}
-
-interface ProductContextType {
-  products: Product[];
-  isLoading: boolean;
-  categories: string[];
-  addProduct: (product: Omit<Product, 'id'>) => void;
-  updateProduct: (id: string, product: Omit<Product, 'id'>) => void;
-  deleteProduct: (id: string) => void;
-  getProduct: (id: string) => Product | undefined;
-  getProductsByCategory: (category: string) => Product[];
-  clearProductsData: () => void;
-}
-
-const ProductContext = createContext<ProductContextType | undefined>(undefined);
 
 const initialProducts: Product[] = [
   // Cosmetics & Personal Care
@@ -721,7 +701,7 @@ const initialProducts: Product[] = [
   },
   {
     id: '36',
-    name: 'Shine X Scourer',
+    name: 'Shine X Scourer (Red)',
     category: 'Cleaning Products',
     description: 'Heavy-duty scourer for tough grime and stains.',
     image: '/shine-x-scourer-1.jpg',
@@ -729,14 +709,12 @@ const initialProducts: Product[] = [
       '/shine-x-scourer-1.jpg',
       '/shine-x-scourer-4.png',
       '/shine-x-scourer-5.png'
-
-      
     ],
     features: ['Removes tough stains', 'Durable', 'Easy to grip']
   },
   {
    id: '58',
-    name: 'Shine X Scourer',
+    name: 'Shine X Scourer (Green)',
     category: 'Cleaning Products',
     description: 'Heavy-duty scourer for tough grime and stains.',
     image: '/shine-x-scourer-2.png',
@@ -749,7 +727,7 @@ const initialProducts: Product[] = [
   },
   {
    id: '59',
-    name: 'Shine X Scourer',
+    name: 'Shine X Scourer (Blue)',
     category: 'Cleaning Products',
     description: 'Heavy-duty scourer for tough grime and stains.',
     image: '/shine-x-scourer-3.png',
@@ -839,20 +817,178 @@ const initialProducts: Product[] = [
   }
 ];
 
-export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export function ProductProvider({ children }: { children: React.ReactNode }) {
   const [products, setProducts] = useState<Product[]>(initialProducts);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Fetch products from Supabase on component mount
   useEffect(() => {
-    // Always clear localStorage and reload initialProducts on every reload (for development)
-    localStorage.removeItem('products_data');
-    setProducts(initialProducts);
-    setIsLoading(false);
+    const fetchProducts = async () => {
+      try {
+        setIsLoading(true);
+        
+        // Check if Supabase credentials are configured
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        
+        // Check if credentials are properly configured (not placeholder values)
+        const isPlaceholder = 
+          !supabaseUrl || !supabaseKey || 
+          supabaseUrl.includes('your-project-id') || 
+          supabaseKey.includes('your-actual-key-here');
+        
+        if (supabaseUrl && supabaseKey && !isPlaceholder) {
+          console.log('Using Supabase with configured credentials');
+          // Try to fetch from Supabase
+          try {
+            const { data, error } = await supabase
+              .from('products')
+              .select('*');
+            
+            if (error) {
+              console.error('Error fetching products from Supabase:', error);
+              // Fall back to localStorage or initialProducts
+              fallbackToLocalStorage();
+            } else if (data && data.length > 0) {
+              console.log('Products loaded from Supabase');
+              setProducts(data as Product[]);
+            } else {
+              console.log('No products found in Supabase, using initial data');
+              // If Supabase table is empty, use initialProducts and sync to Supabase
+              setProducts(initialProducts);
+              // Optionally sync initial products to Supabase
+              syncInitialProductsToSupabase();
+            }
+          } catch (supabaseError) {
+            console.error('Exception during Supabase operation:', supabaseError);
+            fallbackToLocalStorage();
+          }
+        } else {
+          console.log('Supabase credentials not properly configured, using localStorage/initial data');
+          if (isPlaceholder) {
+            console.warn('Placeholder Supabase credentials detected. Please update .env with actual credentials.');
+          }
+          // Fall back to localStorage or initialProducts
+          fallbackToLocalStorage();
+        }
+      } catch (error) {
+        console.error('Error in product fetching process:', error);
+        // Fall back to localStorage or initialProducts
+        fallbackToLocalStorage();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    const fallbackToLocalStorage = () => {
+      // Check localStorage for saved products
+      const savedData = localStorage.getItem('products_data');
+      if (savedData) {
+        try {
+          const parsedData = JSON.parse(savedData);
+          if (parsedData.products && Array.isArray(parsedData.products)) {
+            setProducts(parsedData.products);
+            return;
+          }
+        } catch (e) {
+          console.error('Error parsing products from localStorage:', e);
+        }
+      }
+      // If localStorage fails or is empty, use initialProducts
+      setProducts(initialProducts);
+    };
+    
+    const syncInitialProductsToSupabase = async () => {
+      try {
+        // First check if table exists and has data
+        const { count, error: countError } = await supabase
+          .from('products')
+          .select('*', { count: 'exact', head: true });
+          
+        if (countError) {
+          console.error('Error checking products count:', countError);
+          return;
+        }
+        
+        // Only sync if table is empty
+        if (count === 0) {
+          console.log('Syncing initial products to Supabase...');
+          // Insert all initial products
+          const { error } = await supabase
+            .from('products')
+            .insert(initialProducts);
+            
+          if (error) {
+            console.error('Error syncing initial products to Supabase:', error);
+          } else {
+            console.log('Initial products synced to Supabase successfully');
+          }
+        }
+      } catch (error) {
+        console.error('Error in syncInitialProductsToSupabase:', error);
+      }
+    };
+    
+    fetchProducts();
   }, []);
 
-  const saveProducts = (newProducts: Product[]) => {
+  const saveProducts = async (newProducts: Product[]) => {
     setProducts(newProducts);
+    
+    // Save to localStorage as fallback
     localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+    
+    // Try to sync with Supabase if credentials are available
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    
+    // Check if credentials are properly configured (not placeholder values)
+    const isPlaceholder = 
+      !supabaseUrl || !supabaseKey || 
+      supabaseUrl.includes('your-project-id') || 
+      supabaseKey.includes('your-actual-key-here');
+    
+    if (supabaseUrl && supabaseKey && !isPlaceholder) {
+      try {
+        // We don't await this to keep the UI responsive
+        syncProductsToSupabase(newProducts).catch(error => {
+          console.error('Background sync to Supabase failed:', error);
+        });
+      } catch (error) {
+        console.error('Error initiating Supabase sync:', error);
+      }
+    } else if (isPlaceholder) {
+      console.warn('Skipping Supabase sync - placeholder credentials detected');
+    }
+  };
+  
+  // Helper function to sync products to Supabase
+  const syncProductsToSupabase = async (productsToSync: Product[]) => {
+    try {
+      // First clear the table (simple approach - in production you might want more sophisticated syncing)
+      const { error: deleteError } = await supabase
+        .from('products')
+        .delete()
+        .not('id', 'is', null); // Safety check to avoid deleting everything if filter fails
+      
+      if (deleteError) {
+        console.error('Error clearing products table:', deleteError);
+        return;
+      }
+      
+      // Then insert all current products
+      const { error: insertError } = await supabase
+        .from('products')
+        .insert(productsToSync);
+      
+      if (insertError) {
+        console.error('Error inserting products to Supabase:', insertError);
+      } else {
+        console.log('Products successfully synced to Supabase');
+      }
+    } catch (error) {
+      console.error('Error in syncProductsToSupabase:', error);
+    }
   };
 
   const categories = [
@@ -871,31 +1007,213 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     'Craft Supplies'
   ];
 
-  const addProduct = (product: Omit<Product, 'id'>) => {
+  const addProduct = async (product: Omit<Product, 'id'>) => {
+    // Create new product with generated ID
     const newProduct: Product = {
       ...product,
-      id: Date.now().toString(),
+      id: Date.now().toString(), // We'll keep using client-side IDs for consistency
       images: product.images && product.images.length > 0 ? product.images : [product.image]
     };
+    
+    // Update local state immediately for responsive UI
     const newProducts = [...products, newProduct];
-    saveProducts(newProducts);
+    setProducts(newProducts);
+    
+    try {
+      // Try to add to Supabase first
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      // Check if credentials are properly configured (not placeholder values)
+      const isPlaceholder = 
+        !supabaseUrl || !supabaseKey || 
+        supabaseUrl.includes('your-project-id') || 
+        supabaseKey.includes('your-actual-key-here');
+      
+      if (supabaseUrl && supabaseKey && !isPlaceholder) {
+        try {
+          const { error } = await supabase
+            .from('products')
+            .insert(newProduct);
+            
+          if (error) {
+            console.error('Error adding product to Supabase:', error);
+            // Fall back to localStorage only
+            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          } else {
+            console.log('Product added to Supabase successfully');
+            // Also update localStorage as backup
+            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          }
+        } catch (insertError) {
+          console.error('Exception during Supabase insert:', insertError);
+          localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+        }
+      } else {
+        // If no Supabase credentials or using placeholders, just use localStorage
+        if (isPlaceholder) {
+          console.warn('Using localStorage only - Supabase placeholder credentials detected');
+        } else {
+          console.log('No Supabase credentials found, using localStorage only');
+        }
+        localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+      }
+    } catch (error) {
+      console.error('Error in addProduct:', error);
+      // Ensure localStorage is updated as fallback
+      localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+    }
   };
 
-  const clearProductsData = () => {
-  localStorage.removeItem('products_data');
-  setProducts(initialProducts);
-};
+  const clearProductsData = async () => {
+    // Update local state immediately
+    setProducts(initialProducts);
+    localStorage.removeItem('products_data');
+    
+    try {
+      // Try to clear and reset Supabase data
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      if (supabaseUrl && supabaseKey) {
+        // First clear the table
+        const { error: deleteError } = await supabase
+          .from('products')
+          .delete()
+          .not('id', 'is', null); // Safety check
+          
+        if (deleteError) {
+          console.error('Error clearing products from Supabase:', deleteError);
+          return;
+        }
+        
+        // Then insert initial products
+        const { error: insertError } = await supabase
+          .from('products')
+          .insert(initialProducts);
+          
+        if (insertError) {
+          console.error('Error resetting products in Supabase:', insertError);
+        } else {
+          console.log('Products reset in Supabase successfully');
+        }
+      }
+    } catch (error) {
+      console.error('Error in clearProductsData:', error);
+    }
+  };
 
-  const updateProduct = (id: string, updatedProduct: Omit<Product, 'id'>) => {
+  const updateProduct = async (id: string, updatedProduct: Omit<Product, 'id'>) => {
+    // Create the fully updated product object
+    const fullUpdatedProduct = { 
+      ...updatedProduct, 
+      id, 
+      images: updatedProduct.images || [updatedProduct.image] 
+    };
+    
+    // Update local state immediately for responsive UI
     const newProducts = products.map(product =>
-      product.id === id ? { ...updatedProduct, id, images: updatedProduct.images || [updatedProduct.image] } : product
+      product.id === id ? fullUpdatedProduct : product
     );
-    saveProducts(newProducts);
+    setProducts(newProducts);
+    
+    try {
+      // Try to update in Supabase first
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      // Check if credentials are properly configured (not placeholder values)
+      const isPlaceholder = 
+        !supabaseUrl || !supabaseKey || 
+        supabaseUrl.includes('your-project-id') || 
+        supabaseKey.includes('your-actual-key-here');
+      
+      if (supabaseUrl && supabaseKey && !isPlaceholder) {
+        try {
+          const { error } = await supabase
+            .from('products')
+            .update(fullUpdatedProduct)
+            .eq('id', id);
+            
+          if (error) {
+            console.error('Error updating product in Supabase:', error);
+            // Fall back to localStorage only
+            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          } else {
+            console.log('Product updated in Supabase successfully');
+            // Also update localStorage as backup
+            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          }
+        } catch (updateError) {
+          console.error('Exception during Supabase update:', updateError);
+          localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+        }
+      } else {
+        // If no Supabase credentials or using placeholders, just use localStorage
+        if (isPlaceholder) {
+          console.warn('Using localStorage only - Supabase placeholder credentials detected');
+        } else {
+          console.log('No Supabase credentials found, using localStorage only');
+        }
+        localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+      }
+    } catch (error) {
+      console.error('Error in updateProduct:', error);
+      // Ensure localStorage is updated as fallback
+      localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+    }
   };
 
-  const deleteProduct = (id: string) => {
+  const deleteProduct = async (id: string) => {
+    // Update local state immediately for responsive UI
     const newProducts = products.filter(product => product.id !== id);
-    saveProducts(newProducts);
+    setProducts(newProducts);
+    
+    try {
+      // Try to delete from Supabase first
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      // Check if credentials are properly configured (not placeholder values)
+      const isPlaceholder = 
+        !supabaseUrl || !supabaseKey || 
+        supabaseUrl.includes('your-project-id') || 
+        supabaseKey.includes('your-actual-key-here');
+      
+      if (supabaseUrl && supabaseKey && !isPlaceholder) {
+        try {
+          const { error } = await supabase
+            .from('products')
+            .delete()
+            .eq('id', id);
+            
+          if (error) {
+            console.error('Error deleting product from Supabase:', error);
+            // Fall back to localStorage only
+            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          } else {
+            console.log('Product deleted from Supabase successfully');
+            // Also update localStorage as backup
+            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          }
+        } catch (deleteError) {
+          console.error('Exception during Supabase delete:', deleteError);
+          localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+        }
+      } else {
+        // If no Supabase credentials or using placeholders, just use localStorage
+        if (isPlaceholder) {
+          console.warn('Using localStorage only - Supabase placeholder credentials detected');
+        } else {
+          console.log('No Supabase credentials found, using localStorage only');
+        }
+        localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+      }
+    } catch (error) {
+      console.error('Error in deleteProduct:', error);
+      // Ensure localStorage is updated as fallback
+      localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+    }
   };
 
   const getProduct = (id: string) => {
@@ -921,12 +1239,6 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
       {children}
     </ProductContext.Provider>
   );
-};
+}
 
-export const useProducts = () => {
-  const context = useContext(ProductContext);
-  if (context === undefined) {
-    throw new Error('useProducts must be used within a ProductProvider');
-  }
-  return context;
-};
+// The useProducts hook is now in src/hooks/useProducts.ts

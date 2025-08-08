@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, Navigate } from 'react-router-dom';
 import { ArrowLeft, Package, Check } from 'lucide-react';
-import { useProducts } from '../contexts/ProductContext';
+import { useProducts } from '../hooks/useProducts';
 import SEO from '../components/SEO';
 
 const ProductDetailPage: React.FC = () => {

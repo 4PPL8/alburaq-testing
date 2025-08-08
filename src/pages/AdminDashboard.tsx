@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Edit3, Trash2, Eye, Upload, X, Check, AlertTriangle, Loader2 } from 'lucide-react';
-import { useProducts, Product } from '../contexts/ProductContext'; // Import Product interface
+import { useProducts } from '../hooks/useProducts';
+import { Product } from '../types/Product'; // Import Product interface
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify'; // Import toast (ToastContainer is in App.tsx)
 
@@ -31,7 +32,7 @@ const ConfirmDeleteModal: React.FC<{ productId: string, onConfirm: () => void, o
 
 
 const AdminDashboard: React.FC = () => {
-  const { products, categories, addProduct, updateProduct, deleteProduct, isLoading: productsLoading } = useProducts();
+  const { products, categories, addProduct, updateProduct, deleteProduct, clearProductsData, isLoading: productsLoading } = useProducts();
   const { adminInfo } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'manage'>('overview');
   const [showModal, setShowModal] = useState(false);
@@ -158,7 +159,7 @@ const AdminDashboard: React.FC = () => {
   };
 
   // Handles form submission for adding or updating a product
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
@@ -169,7 +170,11 @@ const AdminDashboard: React.FC = () => {
     }
 
     const filteredFeatures = formData.features.filter(feature => feature.trim() !== '');
+    // Only filter images that are not empty strings
     const filteredImages = formData.images.filter(img => img.trim() !== '');
+    
+    // If no additional images are provided but we have a main image, use the main image
+    const finalImages = filteredImages.length > 0 ? filteredImages : [formData.image];
     
     const productData: Omit<Product, 'id'> = {
       name: formData.name.trim(),
@@ -177,20 +182,24 @@ const AdminDashboard: React.FC = () => {
       description: formData.description.trim(),
       image: formData.image, // This now holds Base64 or direct path
       features: filteredFeatures,
-      images: filteredImages
+      images: finalImages
     };
 
-    setTimeout(() => {
+    try {
       if (modalMode === 'add') {
-        addProduct(productData);
+        await addProduct(productData);
         toast.success('Product added successfully!');
       } else if (selectedProduct) {
-        updateProduct(selectedProduct.id, productData);
+        await updateProduct(selectedProduct.id, productData);
         toast.success('Product updated successfully!');
       }
       setIsSubmitting(false);
       handleCloseModal();
-    }, 1000);
+    } catch (error) {
+      console.error('Error submitting product:', error);
+      toast.error('There was an error saving the product. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
   if (productsLoading) {
@@ -203,17 +212,35 @@ const AdminDashboard: React.FC = () => {
         </div>
       </div>
     );
+  }
+  
+  // Handle clearing all products data
+  const handleClearProducts = async () => {
+    if (window.confirm('Are you sure you want to reset all products data? This will restore the default products.')) {
+      try {
+        await clearProductsData();
+        toast.success('Products data has been reset to defaults!');
+      } catch (error) {
+        console.error('Error resetting products data:', error);
+        toast.error('There was an error resetting the products data. Please try again.');
+      }
+    }
   };
 
   const handleDelete = (id: string) => {
     setDeleteConfirm(id);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (deleteConfirm) {
-      deleteProduct(deleteConfirm);
-      toast.success('Product deleted successfully!');
-      setDeleteConfirm(null);
+      try {
+        await deleteProduct(deleteConfirm);
+        toast.success('Product deleted successfully!');
+        setDeleteConfirm(null);
+      } catch (error) {
+        console.error('Error deleting product:', error);
+        toast.error('There was an error deleting the product. Please try again.');
+      }
     }
   };
 
@@ -338,7 +365,17 @@ const AdminDashboard: React.FC = () => {
           <div className="space-y-6">
             {/* Add Product Button */}
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-gray-800">Manage Products</h2>
+              <div className="flex items-center space-x-4">
+                <h2 className="text-2xl font-bold text-gray-800">Manage Products</h2>
+                <button
+                  onClick={handleClearProducts}
+                  className="inline-flex items-center px-4 py-2 bg-yellow-500 text-white font-medium rounded-lg hover:bg-yellow-600 transition-colors duration-200 text-sm"
+                  title="Reset to default products"
+                >
+                  <AlertTriangle className="w-4 h-4 mr-2" />
+                  Reset Products
+                </button>
+              </div>
               <button
                 onClick={() => handleOpenModal('add')}
                 className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors duration-200"
@@ -532,8 +569,20 @@ const AdminDashboard: React.FC = () => {
                             value={image}
                             onChange={(e) => handleImageChange(index, e.target.value)}
                             className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="Enter image URL"
+                            placeholder="Enter image URL (optional)"
                           />
+                          {image && (
+                            <div className="w-10 h-10 relative flex-shrink-0">
+                              <img
+                                src={image}
+                                alt="Preview"
+                                className="w-full h-full object-cover rounded-md"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://placehold.co/40x40/E0E0E0/000000?text=Error';
+                                }}
+                              />
+                            </div>
+                          )}
                           {formData.images.length > 1 && (
                             <button
                               type="button"
@@ -552,6 +601,9 @@ const AdminDashboard: React.FC = () => {
                       >
                         + Add Another Image
                       </button>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Additional images are optional. If none are provided, the main image will be used.
+                      </p>
                     </div>
                   </div>
 

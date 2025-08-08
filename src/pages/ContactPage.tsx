@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Phone, MapPin, Clock, MessageCircle, Send, CheckSquare, Square, AlertCircle } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { useProducts, Product } from '../contexts/ProductContext';
+import { useProducts } from '../hooks/useProducts';
+import { Product } from '../types/Product';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import SEO from '../components/SEO';
