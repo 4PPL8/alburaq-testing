@@ -11,6 +11,7 @@ export interface ProductContextType {
   getProduct: (id: string) => Product | undefined;
   getProductsByCategory: (category: string) => Product[];
   clearProductsData: () => void;
+  forceInitialProductsToSupabase: () => Promise<boolean>;
 }
 
 export default ProductContextType;

@@ -820,118 +820,74 @@ const initialProducts: Product[] = [
 export function ProductProvider({ children }: { children: React.ReactNode }) {
   const [products, setProducts] = useState<Product[]>(initialProducts);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  
+  // Force push all initial products to Supabase, replacing existing data
+  const forceInitialProductsToSupabase = async (): Promise<boolean> => {
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      // Check if credentials are properly configured (not placeholder values)
+      const isPlaceholder = 
+        !supabaseUrl || !supabaseKey || 
+        supabaseUrl.includes('your-project-id') || 
+        supabaseKey.includes('your-actual-key-here');
+      
+      if (supabaseUrl && supabaseKey && !isPlaceholder) {
+        console.log('Clearing existing products from Supabase...');
+        // First delete all existing products
+        const { error: deleteError } = await supabase
+          .from('products')
+          .delete()
+          .not('id', 'is', null); // Safety check to avoid deleting everything if filter fails
+        
+        if (deleteError) {
+          console.error('Error deleting existing products:', deleteError);
+          return false;
+        }
+        
+        console.log('Inserting initial products into Supabase...');
+        // Then insert all initial products
+        const { error: insertError } = await supabase
+          .from('products')
+          .insert(initialProducts);
+        
+        if (insertError) {
+          console.error('Error inserting initial products:', insertError);
+          return false;
+        }
+        
+        console.log('Initial products successfully pushed to Supabase');
+        
+        // Refresh products from Supabase to get server-generated timestamps
+        const { data, error: fetchError } = await supabase
+          .from('products')
+          .select('*');
+          
+        if (fetchError) {
+          console.error('Error fetching products after reset:', fetchError);
+        } else if (data) {
+          setProducts(data as Product[]);
+          console.log('Products state updated with fresh data from Supabase');
+        }
+        
+        return true;
+      } else {
+        if (isPlaceholder) {
+          console.warn('Cannot push products to Supabase - placeholder credentials detected');
+        } else {
+          console.warn('Cannot push products to Supabase - no credentials found');
+        }
+        return false;
+      }
+    } catch (error) {
+      console.error('Error in forceInitialProductsToSupabase:', error);
+      return false;
+    }
+  };
 
   // Fetch products from Supabase on component mount
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        setIsLoading(true);
-        
-        // Check if Supabase credentials are configured
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-        
-        // Check if credentials are properly configured (not placeholder values)
-        const isPlaceholder = 
-          !supabaseUrl || !supabaseKey || 
-          supabaseUrl.includes('your-project-id') || 
-          supabaseKey.includes('your-actual-key-here');
-        
-        if (supabaseUrl && supabaseKey && !isPlaceholder) {
-          console.log('Using Supabase with configured credentials');
-          // Try to fetch from Supabase
-          try {
-            const { data, error } = await supabase
-              .from('products')
-              .select('*');
-            
-            if (error) {
-              console.error('Error fetching products from Supabase:', error);
-              // Fall back to localStorage or initialProducts
-              fallbackToLocalStorage();
-            } else if (data && data.length > 0) {
-              console.log('Products loaded from Supabase');
-              setProducts(data as Product[]);
-            } else {
-              console.log('No products found in Supabase, using initial data');
-              // If Supabase table is empty, use initialProducts and sync to Supabase
-              setProducts(initialProducts);
-              // Optionally sync initial products to Supabase
-              syncInitialProductsToSupabase();
-            }
-            
-            // Set up real-time subscription for products table
-            setupRealtimeSubscription();
-          } catch (supabaseError) {
-            console.error('Exception during Supabase operation:', supabaseError);
-            fallbackToLocalStorage();
-          }
-        } else {
-          console.log('Supabase credentials not properly configured, using localStorage/initial data');
-          if (isPlaceholder) {
-            console.warn('Placeholder Supabase credentials detected. Please update .env with actual credentials.');
-          }
-          // Fall back to localStorage or initialProducts
-          fallbackToLocalStorage();
-        }
-      } catch (error) {
-        console.error('Error in product fetching process:', error);
-        // Fall back to localStorage or initialProducts
-        fallbackToLocalStorage();
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    const syncInitialProductsToSupabase = async () => {
-      try {
-        // First check if table exists and has data
-        const { count, error: countError } = await supabase
-          .from('products')
-          .select('*', { count: 'exact', head: true });
-          
-        if (countError) {
-          console.error('Error checking products count:', countError);
-          return;
-        }
-        
-        // Only sync if table is empty
-        if (count === 0) {
-          console.log('Syncing initial products to Supabase...');
-          // Insert all initial products
-          const { error } = await supabase
-            .from('products')
-            .insert(initialProducts);
-            
-          if (error) {
-            console.error('Error syncing initial products to Supabase:', error);
-          } else {
-            console.log('Initial products synced to Supabase successfully');
-          }
-        }
-      } catch (error) {
-        console.error('Error in syncInitialProductsToSupabase:', error);
-      }
-    };
-    
-    const fallbackToLocalStorage = () => {
-      // Check localStorage for saved products
-      const savedData = localStorage.getItem('products_data');
-      if (savedData) {
-        try {
-          const parsedData = JSON.parse(savedData);
-          if (parsedData.products && Array.isArray(parsedData.products)) {
-            setProducts(parsedData.products);
-            return;
-          }
-        } catch (e) {
-          console.error('Error parsing products from localStorage:', e);
-        }
-      }
-      // If localStorage fails or is empty, use initialProducts
-      setProducts(initialProducts);
-    };
-    
     // Set up real-time subscription to the products table
     const setupRealtimeSubscription = () => {
       try {
@@ -968,8 +924,6 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
                   } else if (data) {
                     console.log('Products refreshed after real-time update');
                     setProducts(data as Product[]);
-                    // Update localStorage as backup
-                    localStorage.setItem('products_data', JSON.stringify({ products: data }));
                   }
                 } catch (refreshError) {
                   console.error('Exception during products refresh:', refreshError);
@@ -992,19 +946,127 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
       return () => {};
     };
     
+    const fetchProducts = async () => {
+      try {
+        setIsLoading(true);
+        
+        // Check if Supabase credentials are configured
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        
+        // Check if credentials are properly configured (not placeholder values)
+        const isPlaceholder = 
+          !supabaseUrl || !supabaseKey || 
+          supabaseUrl.includes('your-project-id') || 
+          supabaseKey.includes('your-actual-key-here');
+        
+        if (supabaseUrl && supabaseKey && !isPlaceholder) {
+          console.log('Using Supabase with configured credentials');
+          // Try to fetch from Supabase
+          try {
+            const { data, error } = await supabase
+              .from('products')
+              .select('*');
+            
+            if (error) {
+              console.error('Error fetching products from Supabase:', error);
+              // Use initialProducts as a last resort
+              console.warn('Using initial product data as fallback');
+              setProducts(initialProducts);
+            } else if (data && data.length > 0) {
+              console.log('Products loaded from Supabase');
+              setProducts(data as Product[]);
+            } else {
+              console.log('No products found in Supabase, syncing initial data');
+              // If Supabase table is empty, use initialProducts and sync to Supabase
+              setProducts(initialProducts);
+              // Sync initial products to Supabase
+              await syncInitialProductsToSupabase();
+              
+              // Fetch again to ensure we have the server-generated timestamps
+              const { data: refreshedData, error: refreshError } = await supabase
+                .from('products')
+                .select('*');
+                
+              if (!refreshError && refreshedData) {
+                setProducts(refreshedData as Product[]);
+              }
+            }
+            
+            // Set up real-time subscription for products table
+            return setupRealtimeSubscription();
+          } catch (supabaseError) {
+            console.error('Exception during Supabase operation:', supabaseError);
+            // Use initialProducts as a last resort
+            console.warn('Using initial product data as fallback');
+            setProducts(initialProducts);
+          }
+        } else {
+          console.log('Supabase credentials not properly configured');
+          if (isPlaceholder) {
+            console.warn('Placeholder Supabase credentials detected. Please update .env with actual credentials.');
+          }
+          // Use initialProducts as a last resort
+          console.warn('Using initial product data as fallback');
+          setProducts(initialProducts);
+        }
+      } catch (error) {
+        console.error('Error in product fetching process:', error);
+        // Use initialProducts as a last resort
+        console.warn('Using initial product data as fallback');
+        setProducts(initialProducts);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    const syncInitialProductsToSupabase = async () => {
+    try {
+      // First check if table exists and has data
+      const { count, error: countError } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true });
+          
+      if (countError) {
+        console.error('Error checking products count:', countError);
+        return;
+      }
+      
+      // Only sync if table is empty
+      if (count === 0) {
+        console.log('Syncing initial products to Supabase...');
+        // Insert all initial products
+        const { error } = await supabase
+          .from('products')
+          .insert(initialProducts);
+            
+        if (error) {
+          console.error('Error syncing initial products to Supabase:', error);
+        } else {
+          console.log('Initial products synced to Supabase successfully');
+        }
+      }
+    } catch (error) {
+      console.error('Error in syncInitialProductsToSupabase:', error);
+    }
+  };
+  
+    
+    // Call fetchProducts without expecting a cleanup function
     fetchProducts();
+    
+    // Set up real-time subscription and get its cleanup function
+    const cleanup = setupRealtimeSubscription();
     
     // Cleanup function
     return () => {
-      // Any cleanup needed
+      if (typeof cleanup === 'function') cleanup();
     };
   }, []);
   
   const saveProducts = async (newProducts: Product[]) => {
+    // Update local state immediately for responsive UI
     setProducts(newProducts);
-    
-    // Save to localStorage as fallback
-    localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
     
     // Try to sync with Supabase if credentials are available
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -1088,7 +1150,7 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
     setProducts(newProducts);
     
     try {
-      // Try to add to Supabase first
+      // Try to add to Supabase
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
@@ -1106,44 +1168,61 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
             
           if (error) {
             console.error('Error adding product to Supabase:', error);
-            // Fall back to localStorage only
-            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+            // The product will remain in local state but won't be persisted
+            // This could lead to inconsistency with other clients
+            console.warn('Product only exists in local state and will not be visible to other users');
           } else {
             console.log('Product added to Supabase successfully');
-            // Also update localStorage as backup
-            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+            
+            // Refresh from Supabase to get any server-generated fields
+            const { data, error: refreshError } = await supabase
+              .from('products')
+              .select('*')
+              .eq('id', newProduct.id)
+              .single();
+              
+            if (!refreshError && data) {
+              // Update the local product with the server version
+              const updatedProducts = products.map(p => 
+                p.id === newProduct.id ? (data as Product) : p
+              );
+              setProducts(updatedProducts);
+            }
           }
         } catch (insertError) {
           console.error('Exception during Supabase insert:', insertError);
-          localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          console.warn('Product only exists in local state and will not be visible to other users');
         }
       } else {
-        // If no Supabase credentials or using placeholders, just use localStorage
+        // If no Supabase credentials or using placeholders, warn about data persistence
         if (isPlaceholder) {
-          console.warn('Using localStorage only - Supabase placeholder credentials detected');
+          console.warn('Supabase placeholder credentials detected - product will not be persisted');
         } else {
-          console.log('No Supabase credentials found, using localStorage only');
+          console.warn('No Supabase credentials found - product will not be persisted');
         }
-        localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
       }
     } catch (error) {
       console.error('Error in addProduct:', error);
-      // Ensure localStorage is updated as fallback
-      localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+      console.warn('Product only exists in local state and will not be visible to other users');
     }
   };
 
   const clearProductsData = async () => {
     // Update local state immediately
     setProducts(initialProducts);
-    localStorage.removeItem('products_data');
     
     try {
       // Try to clear and reset Supabase data
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
-      if (supabaseUrl && supabaseKey) {
+      // Check if credentials are properly configured (not placeholder values)
+      const isPlaceholder = 
+        !supabaseUrl || !supabaseKey || 
+        supabaseUrl.includes('your-project-id') || 
+        supabaseKey.includes('your-actual-key-here');
+      
+      if (supabaseUrl && supabaseKey && !isPlaceholder) {
         // First clear the table
         const { error: deleteError } = await supabase
           .from('products')
@@ -1152,6 +1231,7 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
           
         if (deleteError) {
           console.error('Error clearing products from Supabase:', deleteError);
+          console.warn('Products reset only in local state, not in database');
           return;
         }
         
@@ -1162,12 +1242,25 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
           
         if (insertError) {
           console.error('Error resetting products in Supabase:', insertError);
+          console.warn('Products reset only in local state, not in database');
         } else {
           console.log('Products reset in Supabase successfully');
+          
+          // Refresh from Supabase to get any server-generated fields
+          const { data, error: refreshError } = await supabase
+            .from('products')
+            .select('*');
+            
+          if (!refreshError && data) {
+            setProducts(data as Product[]);
+          }
         }
+      } else {
+        console.warn('Supabase credentials not configured - products reset only in local state');
       }
     } catch (error) {
       console.error('Error in clearProductsData:', error);
+      console.warn('Products reset only in local state, not in database');
     }
   };
 
@@ -1186,7 +1279,7 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
     setProducts(newProducts);
     
     try {
-      // Try to update in Supabase first
+      // Try to update in Supabase
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
@@ -1205,30 +1298,40 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
             
           if (error) {
             console.error('Error updating product in Supabase:', error);
-            // Fall back to localStorage only
-            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+            console.warn('Product update only exists in local state and will not be visible to other users');
           } else {
             console.log('Product updated in Supabase successfully');
-            // Also update localStorage as backup
-            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+            
+            // Refresh from Supabase to get any server-generated fields
+            const { data, error: refreshError } = await supabase
+              .from('products')
+              .select('*')
+              .eq('id', id)
+              .single();
+              
+            if (!refreshError && data) {
+              // Update the local product with the server version
+              const updatedProducts = products.map(p => 
+                p.id === id ? (data as Product) : p
+              );
+              setProducts(updatedProducts);
+            }
           }
         } catch (updateError) {
           console.error('Exception during Supabase update:', updateError);
-          localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          console.warn('Product update only exists in local state and will not be visible to other users');
         }
       } else {
-        // If no Supabase credentials or using placeholders, just use localStorage
+        // If no Supabase credentials or using placeholders, warn about data persistence
         if (isPlaceholder) {
-          console.warn('Using localStorage only - Supabase placeholder credentials detected');
+          console.warn('Supabase placeholder credentials detected - product update will not be persisted');
         } else {
-          console.log('No Supabase credentials found, using localStorage only');
+          console.warn('No Supabase credentials found - product update will not be persisted');
         }
-        localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
       }
     } catch (error) {
       console.error('Error in updateProduct:', error);
-      // Ensure localStorage is updated as fallback
-      localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+      console.warn('Product update only exists in local state and will not be visible to other users');
     }
   };
 
@@ -1238,7 +1341,7 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
     setProducts(newProducts);
     
     try {
-      // Try to delete from Supabase first
+      // Try to delete from Supabase
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
@@ -1257,30 +1360,35 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
             
           if (error) {
             console.error('Error deleting product from Supabase:', error);
-            // Fall back to localStorage only
-            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+            console.warn('Product deletion only happened in local state and will not be visible to other users');
+            
+            // Revert local state to match database
+            const { data, error: refreshError } = await supabase
+              .from('products')
+              .select('*');
+              
+            if (!refreshError && data) {
+              console.log('Reverting local state to match database after failed deletion');
+              setProducts(data as Product[]);
+            }
           } else {
             console.log('Product deleted from Supabase successfully');
-            // Also update localStorage as backup
-            localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
           }
         } catch (deleteError) {
           console.error('Exception during Supabase delete:', deleteError);
-          localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+          console.warn('Product deletion only happened in local state and will not be visible to other users');
         }
       } else {
-        // If no Supabase credentials or using placeholders, just use localStorage
+        // If no Supabase credentials or using placeholders, warn about data persistence
         if (isPlaceholder) {
-          console.warn('Using localStorage only - Supabase placeholder credentials detected');
+          console.warn('Supabase placeholder credentials detected - product deletion will not be persisted');
         } else {
-          console.log('No Supabase credentials found, using localStorage only');
+          console.warn('No Supabase credentials found - product deletion will not be persisted');
         }
-        localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
       }
     } catch (error) {
       console.error('Error in deleteProduct:', error);
-      // Ensure localStorage is updated as fallback
-      localStorage.setItem('products_data', JSON.stringify({ products: newProducts }));
+      console.warn('Product deletion only happened in local state and will not be visible to other users');
     }
   };
 
@@ -1302,7 +1410,8 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
       deleteProduct,
       getProduct,
       getProductsByCategory,
-      clearProductsData
+      clearProductsData,
+      forceInitialProductsToSupabase
     }}>
       {children}
     </ProductContext.Provider>

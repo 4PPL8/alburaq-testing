@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Plus, Edit3, Trash2, Eye, Upload, X, Check, AlertTriangle, Loader2 } from 'lucide-react';
+import { Plus, Edit3, Trash2, Eye, Upload, X, Check, AlertTriangle, Loader2, Database } from 'lucide-react';
 import { useProducts } from '../hooks/useProducts';
 import { Product } from '../types/Product'; // Import Product interface
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify'; // Import toast (ToastContainer is in App.tsx)
+import ForceProductSync from '../components/admin/ForceProductSync';
 
 // Custom Confirmation Modal component for Delete
 const ConfirmDeleteModal: React.FC<{ productId: string, onConfirm: () => void, onCancel: () => void }> = ({ productId, onConfirm, onCancel }) => (
@@ -384,6 +385,9 @@ const AdminDashboard: React.FC = () => {
                 Add Product
               </button>
             </div>
+            
+            {/* Supabase Sync Component */}
+            <ForceProductSync />
 
             {/* Products Table */}
             <div className="bg-white rounded-xl shadow-md overflow-hidden">
