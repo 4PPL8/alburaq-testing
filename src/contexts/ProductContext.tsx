@@ -859,6 +859,9 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
               // Optionally sync initial products to Supabase
               syncInitialProductsToSupabase();
             }
+            
+            // Set up real-time subscription for products table
+            setupRealtimeSubscription();
           } catch (supabaseError) {
             console.error('Exception during Supabase operation:', supabaseError);
             fallbackToLocalStorage();
@@ -878,24 +881,6 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
       } finally {
         setIsLoading(false);
       }
-    };
-    
-    const fallbackToLocalStorage = () => {
-      // Check localStorage for saved products
-      const savedData = localStorage.getItem('products_data');
-      if (savedData) {
-        try {
-          const parsedData = JSON.parse(savedData);
-          if (parsedData.products && Array.isArray(parsedData.products)) {
-            setProducts(parsedData.products);
-            return;
-          }
-        } catch (e) {
-          console.error('Error parsing products from localStorage:', e);
-        }
-      }
-      // If localStorage fails or is empty, use initialProducts
-      setProducts(initialProducts);
     };
     
     const syncInitialProductsToSupabase = async () => {
@@ -929,9 +914,92 @@ export function ProductProvider({ children }: { children: React.ReactNode }) {
       }
     };
     
+    const fallbackToLocalStorage = () => {
+      // Check localStorage for saved products
+      const savedData = localStorage.getItem('products_data');
+      if (savedData) {
+        try {
+          const parsedData = JSON.parse(savedData);
+          if (parsedData.products && Array.isArray(parsedData.products)) {
+            setProducts(parsedData.products);
+            return;
+          }
+        } catch (e) {
+          console.error('Error parsing products from localStorage:', e);
+        }
+      }
+      // If localStorage fails or is empty, use initialProducts
+      setProducts(initialProducts);
+    };
+    
+    // Set up real-time subscription to the products table
+    const setupRealtimeSubscription = () => {
+      try {
+        // Check if Supabase credentials are configured
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        
+        // Check if credentials are properly configured (not placeholder values)
+        const isPlaceholder = 
+          !supabaseUrl || !supabaseKey || 
+          supabaseUrl.includes('your-project-id') || 
+          supabaseKey.includes('your-actual-key-here');
+        
+        if (supabaseUrl && supabaseKey && !isPlaceholder) {
+          console.log('Setting up real-time subscription for products table');
+          
+          // Subscribe to all changes on the products table
+          const subscription = supabase
+            .channel('products-changes')
+            .on('postgres_changes', 
+              { event: '*', schema: 'public', table: 'products' }, 
+              async (payload) => {
+                console.log('Real-time update received:', payload);
+                
+                // Refresh the entire products list when any change occurs
+                // This ensures all clients have the same data
+                try {
+                  const { data, error } = await supabase
+                    .from('products')
+                    .select('*');
+                  
+                  if (error) {
+                    console.error('Error refreshing products after real-time update:', error);
+                  } else if (data) {
+                    console.log('Products refreshed after real-time update');
+                    setProducts(data as Product[]);
+                    // Update localStorage as backup
+                    localStorage.setItem('products_data', JSON.stringify({ products: data }));
+                  }
+                } catch (refreshError) {
+                  console.error('Exception during products refresh:', refreshError);
+                }
+              }
+            )
+            .subscribe();
+          
+          // Return cleanup function to unsubscribe when component unmounts
+          return () => {
+            console.log('Cleaning up real-time subscription');
+            subscription.unsubscribe();
+          };
+        }
+      } catch (error) {
+        console.error('Error setting up real-time subscription:', error);
+      }
+      
+      // Return empty cleanup function if subscription wasn't set up
+      return () => {};
+    };
+    
     fetchProducts();
+    
+    // Cleanup function
+    return () => {
+      // Any cleanup needed
+    };
   }, []);
-
+  
   const saveProducts = async (newProducts: Product[]) => {
     setProducts(newProducts);
     
